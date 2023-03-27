@@ -7,8 +7,13 @@ class Neural_network():
 
     sigmoid = np.vectorize( lambda x: (np.tanh(x/2) + 1) / 2 )
 
-    def __init__(self, layers, outputs, logsize, gradient_coeff = 1, activation = 'sigmoid', activ_deriv_inv = 'sigmoid'):
-
+    def __init__(self, layers, outputs, logsize, learning_rate = 1, activation = 'sigmoid', activ_deriv_inv = 'sigmoid'):
+        #Creates a neural network with layer sizes mentioned in layers
+        #For example if layer is [4,3,2] the neural network created has 4 neurons in input layer, 3 neurons in a hidden layer and 2 neurons in the output layer
+        #For the activation, either a preset function can be given (sigmoid, relu) or a lambda function can be specified
+        #If f(x) is the activation function, activ_deriv_inv is f'( f inverse ( x ) )
+        #Outputs is the list of outputs to be displayed if the corresponding output neron is activated
+        
         self.example_no = 0
         self.logsize = logsize
         self.batch_cost_sum = 0
@@ -16,7 +21,7 @@ class Neural_network():
         self.cost_log = {}
         self.accuracy_log = {}
         self.outputs = outputs
-        self.gradient_coeff = gradient_coeff
+        self.learning_rate = learning_rate
 
         if activation.lower() == 'sigmoid':
             self.activation_name = activation
@@ -42,7 +47,6 @@ class Neural_network():
             
     def backpropogate(self, inputs, answer):
         layers = [np.array(inputs) / max(inputs),]
-        
 
         for layer in range(len(self.biases)):
             if layer == len(self.biases) - 1:
@@ -58,7 +62,7 @@ class Neural_network():
         expectation [self.outputs.index(answer)] = 1
 
         self.example_no += 1
-        cost = sum((layers[-1] - expectation) ** 2)
+        cost = sum((layers[-1] - expectation) ** 2) / len(self.outputs)
         self.batch_cost_sum += cost
 
         if self.outputs [np.where(layers[-1] == max(layers[-1]))[0][0]] == answer:
@@ -70,7 +74,7 @@ class Neural_network():
             else:
                 batch_size = self.example_no - list(self.cost_log.keys())[-1]
             
-            self.cost_log [self.example_no] = self.batch_cost_sum / (batch_size * len(self.outputs))
+            self.cost_log [self.example_no] = self.batch_cost_sum / batch_size
             self.batch_cost_sum = 0
 
             self.accuracy_log [self.example_no] = 100 * self.batch_corr_predict / batch_size
@@ -96,7 +100,7 @@ class Neural_network():
         weights_gradient = []
         
         for layer in range(n):
-            bias_gradient.append( np.zeros(len(self.biases[layer])) )
+            bias_gradient.append( np.zeros(self.biases[layer].shape) )
             weights_gradient.append( np.zeros(self.weights[layer].shape) )
 
         if label == 'first':
@@ -116,15 +120,20 @@ class Neural_network():
                 weights_gradient[layer] += weights_sensitivity[layer]
 
         for layer in range(n):
-                self.biases[layer] += (bias_gradient[layer] / batch_size) * - self.gradient_coeff
-                self.weights[layer] += (weights_gradient[layer] / batch_size) * - self.gradient_coeff
+                self.biases[layer] += (bias_gradient[layer] / batch_size) * - self.learning_rate
+                self.weights[layer] += (weights_gradient[layer] / batch_size) * - self.learning_rate
 
         return()
 
     def train_from_file(self, file, batch_size, label = 'first', start = 'start', end = 'end', seperator = ',', headers = True):
         n = len(self.biases)
+        
         bias_gradient = []
         weights_gradient = []
+        for layer in range(n):
+                bias_gradient.append( np.zeros(self.biases[layer].shape) )
+                weights_gradient.append( np.zeros(self.weights[layer].shape) )
+        
         convert_to_float = np.vectorize( lambda x: float(x) )
         
         with open(file, 'r') as csv_file:
@@ -142,10 +151,6 @@ class Neural_network():
             next(csv_reader)
             fields_no = len(next(csv_reader))
             csv_file.seek(0)
-            
-            for layer in range(n):
-                bias_gradient.append( np.zeros(len(self.biases[layer])) )
-                weights_gradient.append( np.zeros(self.weights[layer].shape) )
 
             if label == 'first':
                 label = 0
@@ -156,11 +161,12 @@ class Neural_network():
                 data_start = 0
                 data_end = label
 
-            csv_file.seek(start)
+            for i in range(start):
+                next(csv_reader)
             
             if headers == True:
                 next(csv_reader)
-                
+
             for example_no in range(start, end):
                 example = next(csv_reader)
 
@@ -168,7 +174,7 @@ class Neural_network():
                     example[label] = eval(example[label])
                     if example[label] not in self.outputs:
                         example[label] = eval(example[label])
-                    
+
                 bias_sensitivity, weights_sensitivity = self.backpropogate( convert_to_float(example[data_start : data_end]), example[label] )
                 
                 for layer in range(n):
@@ -177,15 +183,14 @@ class Neural_network():
 
                 if (example_no - start) % batch_size == 0:
                     for layer in range(n):
-                        self.biases[layer] += (bias_gradient[layer] / batch_size) * - self.gradient_coeff
-                        self.weights[layer] += (weights_gradient[layer] / batch_size) * - self.gradient_coeff
-                        
-                    '''for i in bias_gradient:
-                        print(i/batch_size)
-                    print()
-                    for i in weights_gradient:
-                        print(i/batch_size)
-                    print('\n')'''
+                        self.biases[layer] += (bias_gradient[layer] / batch_size) * - self.learning_rate
+                        self.weights[layer] += (weights_gradient[layer] / batch_size) * - self.learning_rate
+
+                    bias_gradient = []
+                    weights_gradient = []
+                    for layer in range(n):
+                        bias_gradient.append( np.zeros(self.biases[layer].shape) )
+                        weights_gradient.append( np.zeros(self.weights[layer].shape) )
 
         return()
 
@@ -209,7 +214,7 @@ class Neural_network():
             csv_writer = csv.writer(file, delimiter = '\t', quoting = csv.QUOTE_NONNUMERIC)
 
             csv_writer.writerow( [self.example_no, self.logsize, self.batch_cost_sum, self.batch_corr_predict, str(self.cost_log), str(self.accuracy_log)] )
-            csv_writer.writerow( [self.activation_name, self.gradient_coeff] )
+            csv_writer.writerow( [self.activation_name, self.learning_rate] )
             csv_writer.writerow( self.outputs )
 
             biases = []
@@ -248,7 +253,7 @@ class Neural_network():
         model.batch_corr_predict = int(model_data[0][3])
         model.cost_log = eval(model_data[0][4])
         model.accuracy_log = eval(model_data[0][5])
-        model.gradient_coeff = model_data[1][1]
+        model.learning_rate = model_data[1][1]
         model.outputs = model_data[2]
 
         model.biases = []
