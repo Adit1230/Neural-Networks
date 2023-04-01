@@ -5,12 +5,41 @@ import matplotlib.pyplot as plt
 
 class Neural_network():
 
-    sigmoid = np.vectorize( lambda x: (np.tanh(x/2) + 1) / 2 )
+    def sigmoid(x):
+        return( (np.tanh(x/2) + 1) / 2 )
+    
+    def sigmoid_prime_inv(y):
+        ans = np.zeros((len(y), len(y)))
+        for i in range(len(y)):
+            ans[i, i] = y[i] - y[i]**2
+        return(ans)
+    
+    def ReLU(x):
+        return( np.maximum(0, x) )
+    
+    def ReLU_prime_inv(y):
+        ans = np.zeros((len(y), len(y)))
+        for i in range(len(y)):
+            ans[i, i] = int(y[i] > 0)
+        return(ans)
+        
+    
+    def softmax(x):
+        x = x - ((max(x)//700) * 700)
+        y = np.exp(x) / sum( np.exp(x) )
+        return(y)
+    
+    def softmax_prime_inv(y):
+        ans = np.outer(y, y) * -1
+        for i in range(len(y)):
+            ans[i, i] = y[i] - y[i] ** 2
+        return(ans)
 
-    def __init__(self, layers, outputs, logsize, learning_rate = 1, activation = 'sigmoid', activ_deriv_inv = 'sigmoid'):
+    def __init__(self, layers, outputs, logsize, learning_rate = 1, activations = 'sigmoid', activ_deriv_inv = 'sigmoid'):
         #Creates a neural network with layer sizes mentioned in layers
         #For example if layer is [4,3,2] the neural network created has 4 neurons in input layer, 3 neurons in a hidden layer and 2 neurons in the output layer
-        #For the activation, either a preset function can be given (sigmoid, relu) or a lambda function can be specified
+        #Activations is a list of the activation functions for each layer
+        #Providing a single function name will set activation functions of all layers to that function
         #If f(x) is the activation function, activ_deriv_inv is f'( f inverse ( x ) )
         #Outputs is the list of outputs to be displayed if the corresponding output neron is activated
         
@@ -23,36 +52,57 @@ class Neural_network():
         self.outputs = outputs
         self.learning_rate = learning_rate
 
-        if activation.lower() == 'sigmoid':
-            self.activation_name = activation
-            self.activation = Neural_network.sigmoid
-            self.activ_deriv_inv = np.vectorize( lambda x: x - x**2 )
-            weight_init_coeff = lambda layer_size: math.sqrt(1 / layer_size)
-        elif activation.lower() == 'relu':
-            self.activation_name = activation
-            self.activation = lambda x: np.maximum(0, x)
-            self.activ_deriv_inv = np.vectorize( lambda x: int(x>0) )
-            weight_init_coeff = lambda layer_size: math.sqrt(2 / layer_size)
+        self.activations = []
+        self.activation_names = []
+        self.activ_deriv_inv = []
+
+        if type(activations) == str:
+            if activations.lower() == 'sigmoid':
+                for layer in range(len(layers) - 1):
+                    self.activation_names.append(activations)
+                    self.activations.append( Neural_network.sigmoid )
+                    self.activ_deriv_inv.append( Neural_network.sigmoid_prime_inv )
+            
+            elif activations.lower() == 'relu':
+                for layer in range(len(layers) - 1):
+                    self.activation_names.append(activations)
+                    self.activations.append( Neural_network.ReLU )
+                    self.activ_deriv_inv.append( Neural_network.ReLU_prime_inv )
+                
+            elif activations.lower() == 'softmax':
+                for layer in range(len(layers) - 1):
+                    self.activation_names.append(activations)
+                    self.activations.append( Neural_network.softmax )
+                    self.activ_deriv_inv.append( Neural_network.softmax_prime_inv )
+
         else:
-            self.activation = np.vectorize( activation )
-            self.activ_deriv_inv =  np.vectorize( activ_deriv_inv )
-            weight_init_coeff = lambda layer_size: 1
+            for function in activations:
+                if function.lower() == 'sigmoid':
+                    self.activations.append( Neural_network.sigmoid )
+                    self.activ_deriv_inv.append( Neural_network.sigmoid_prime_inv )
+                
+                elif function.lower() == 'relu':
+                    self.activations.append( Neural_network.ReLU )
+                    self.activ_deriv_inv.append( Neural_network.ReLU_prime_inv )
+
+                elif function.lower() in ('softmax', 'softargmax'):
+                    self.activations.append( Neural_network.softmax )
+                    self.activ_deriv_inv.append( Neural_network.softmax_prime_inv )
+
+            self.activation_names = activations
         
         self.biases = []
         self.weights = []
         
         for layer in range(1, len(layers)):
             self.biases.append( np.zeros(layers[layer]) )
-            self.weights.append( np.random.randn(layers[layer], layers[layer-1]) * weight_init_coeff(layers[layer - 1]) )
+            self.weights.append( np.random.randn(layers[layer], layers[layer-1]) )
             
     def backpropogate(self, inputs, answer):
         layers = [np.array(inputs) / max(inputs),]
 
         for layer in range(len(self.biases)):
-            if layer == len(self.biases) - 1:
-                layers.append(Neural_network.sigmoid( (self.weights[layer] @ layers[layer]) + self.biases[layer]  ))
-            else:
-                layers.append(self.activation( (self.weights[layer] @ layers[layer]) + self.biases[layer]  ))
+            layers.append(self.activations[layer]( (self.weights[layer] @ layers[layer]) + self.biases[layer]  ))
 
         if answer not in self.outputs:
             answer = int(answer)
@@ -64,7 +114,7 @@ class Neural_network():
         self.example_no += 1
         cost = sum((layers[-1] - expectation) ** 2) / len(self.outputs)
         self.batch_cost_sum += cost
-
+        
         if self.outputs [np.where(layers[-1] == max(layers[-1]))[0][0]] == answer:
             self.batch_corr_predict += 1
 
@@ -81,11 +131,11 @@ class Neural_network():
             self.batch_corr_predict = 0
         
         n = len(self.biases)
-        bias_gradient = [2 * (layers[n] - expectation) * (layers[n] - layers[n]**2), ]
+        bias_gradient = [ (self.activ_deriv_inv[-1](layers[n])) @ (2 * (layers[n] - expectation))]
         weights_gradient = [ np.outer(bias_gradient[0], layers[n-1]), ]
         
         for layer in range(1, n):
-            bias_gradient.append( (bias_gradient[layer - 1] @ self.weights[n - layer]) * self.activ_deriv_inv( layers[n - layer] ) )
+            bias_gradient.append( (self.activ_deriv_inv[n - layer - 1]( layers[n - layer] )) @ (bias_gradient[layer - 1] @ self.weights[n - layer]) )
             weights_gradient.append( np.outer( bias_gradient[layer], layers[n - layer - 1]) )
 
         bias_gradient.reverse()
@@ -194,14 +244,70 @@ class Neural_network():
 
         return()
 
+    def test_from_file(self, file, label = 'first', start = 'start', end = 'end', seperator = ',', headers = True):
+        n = len(self.biases)
+        correct_predictions = 0
+
+        convert_to_float = np.vectorize( lambda x: float(x) )
+        
+        with open(file, 'r') as csv_file:
+            csv_reader = csv.reader(csv_file, delimiter = seperator)
+
+            if start == 'start':
+                start = 0
+            if end == 'end':
+                end = len(csv_file.readlines())
+                csv_file.seek(0)
+
+                if headers == True:
+                    end -= 1
+
+            next(csv_reader)
+            fields_no = len(next(csv_reader))
+            csv_file.seek(0)
+
+            if label == 'first':
+                label = 0
+                data_start = 1
+                data_end = fields_no
+            elif label == 'last':
+                label = fields_no - 1
+                data_start = 0
+                data_end = label
+
+            for i in range(start):
+                next(csv_reader)
+            
+            if headers == True:
+                next(csv_reader)
+
+            for example_no in range(start, end):
+                example = next(csv_reader)
+
+                answer = example[label]
+                
+                if answer not in self.outputs:
+                    answer = eval(example[label])
+                    if answer not in self.outputs:
+                        answer = eval(example[label])
+
+                if answer not in self.outputs:
+                    answer = int(answer)
+                    if answer not in self.outputs:
+                        answer = float(answer)
+
+                prediction, confidence = self.predict( convert_to_float( example[data_start : data_end] ) )
+
+                if prediction == answer:
+                    correct_predictions += 1
+
+            return( 100 * correct_predictions / (end - start) )
+
     def predict(self, inputs):
         neurons = np.array(inputs) / max(inputs)
         
         for layer in range(len(self.biases)):
-            if layer == len(self.biases) - 1:
-                neurons = Neural_network.sigmoid( (self.weights[layer] @ neurons) + self.biases[layer]  )
-            else:
-                neurons = self.activation( (self.weights[layer] @ neurons) + self.biases[layer]  )
+            neurons = self.activations[layer]( (self.weights[layer] @ neurons) + self.biases[layer]  )
 
         maxval = max(neurons)
         totalval = sum(neurons)
@@ -214,7 +320,8 @@ class Neural_network():
             csv_writer = csv.writer(file, delimiter = '\t', quoting = csv.QUOTE_NONNUMERIC)
 
             csv_writer.writerow( [self.example_no, self.logsize, self.batch_cost_sum, self.batch_corr_predict, str(self.cost_log), str(self.accuracy_log)] )
-            csv_writer.writerow( [self.activation_name, self.learning_rate] )
+            csv_writer.writerow( [self.learning_rate, ] )
+            csv_writer.writerow( self.activation_names )
             csv_writer.writerow( self.outputs )
 
             biases = []
@@ -245,7 +352,7 @@ class Neural_network():
 
         csv.field_size_limit(131072)
             
-        model = cls([2, 2], [0, 1], 10, activation = model_data[1][0])
+        model = cls([2, 2], [0, 1], 10, activations = model_data[2])
         
         model.example_no = int(model_data[0][0])
         model.logsize = int(model_data[0][1])
@@ -253,16 +360,16 @@ class Neural_network():
         model.batch_corr_predict = int(model_data[0][3])
         model.cost_log = eval(model_data[0][4])
         model.accuracy_log = eval(model_data[0][5])
-        model.learning_rate = model_data[1][1]
-        model.outputs = model_data[2]
+        model.learning_rate = float(model_data[1][0])
+        model.outputs = model_data[3]
 
         model.biases = []
         model.weights = []
 
-        for bias in model_data[3]:
+        for bias in model_data[4]:
             model.biases.append( np.array(eval(bias)) )
 
-        for weight in model_data[4]:
+        for weight in model_data[5]:
             model.weights.append( np.array(eval(weight)) )
 
         return(model)
@@ -292,3 +399,4 @@ class Neural_network():
         plt.grid(True)
 
         plt.show()
+        
